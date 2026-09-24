@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0d1b2a">
+<meta name="description" content="Simulador educacional de trajetória de foguetes. Modelo 3-DOF com núcleo C++17, curvas de empuxo reais e recuperação por paraquedas.">
+<title>Trajetória — Simulador de Voo Educacional</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+
+<!-- ═══════════ HEADER / NAVBAR ═══════════ -->
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="#laboratorio">
+      <span class="brand-icon">↗</span>
+      <span class="brand-text">trajetória<span class="brand-dot">.</span></span>
+    </a>
+    <button class="mobile-menu-toggle" id="menu-toggle" aria-label="Abrir menu" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+    <nav class="main-nav" id="main-nav" aria-label="Navegação principal">
+      <button class="nav-link active" data-view="laboratorio">Laboratório</button>
+      <button class="nav-link" data-view="calculos">Cálculos</button>
+      <button class="nav-link" data-view="validacao">Validação</button>
+      <button class="nav-link" data-view="sobre">Sobre</button>
+    </nav>
+    <span class="engine-badge" id="engine-status">C++17 · RK4</span>
+  </div>
+</header>
+
+<div id="message" class="message" role="status" aria-live="polite" hidden></div>
+
+<!-- ═══════════ LABORATÓRIO ═══════════ -->
+<section id="view-laboratorio" class="view active" aria-label="Laboratório">
+
+  <div class="hero-section">
+    <div class="container">
+      <p class="overline">SIMULADOR EDUCACIONAL DE TRAJETÓRIA</p>
+      <h1 id="page-title">Laboratório de voo<span class="dot">.</span></h1>
+      <p id="page-description" class="hero-subtitle">Configure os parâmetros do veículo, execute a simulação e analise os resultados. Modelo de ponto material com 3 graus de liberdade.</p>
+    </div>
+  </div>
+
+  <!-- Métricas -->
+  <div class="container">
+    <div class="metrics-bar" aria-live="polite">
+      <div class="metric-card">
+        <span class="metric-label">Apogeu</span>
+        <strong id="metric-apogee">—</strong>
+        <small>Altitude máxima</small>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Velocidade máx.</span>
+        <strong id="metric-speed">—</strong>
+        <small>Pico amostrado</small>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Tempo de voo</span>
+        <strong id="metric-time">—</strong>
+        <small id="duration-label">Até contato com o solo</small>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Deslocamento</span>
+        <strong id="metric-distance">—</strong>
+        <small>Distância horizontal</small>
+      </div>
+    </div>
+  </div>
+
+  <!-- Grid principal -->
+  <div class="container">
+    <div class="lab-layout">
+
+      <!-- Coluna de configuração -->
+      <aside class="config-panel card">
+        <div class="card-header">
+          <h2>Configuração de voo</h2>
+          <span class="badge" id="study-name">Estudo 001</span>
+        </div>
+
+        <label class="form-label" for="preset">Cenário</label>
+        <select id="preset">
+          <option value="standard">Exploração suborbital</option>
+          <option value="vacuum">Referência vertical · vácuo</option>
+          <option value="wind">Vento lateral</option>
+          <option value="custom">Personalizado</option>
+        </select>
+        <span id="scenario-label" class="visually-hidden">Suborbital · exemplo sintético</span>
+
+        <form id="config-form">
+          <!-- Propulsão -->
+          <fieldset>
+            <legend>Propulsão</legend>
+            <label class="form-label" for="motor-mode">Modelo do motor</label>
+            <select id="motor-mode">
+              <option value="constant">Empuxo constante</option>
+              <option value="curve">Curva importada</option>
+            </select>
+            <div id="constant-motor-fields" class="field-grid">
+              <label>Empuxo<span class="input-group"><input name="thrust" type="number" min="0" max="10000" step="any" value="12" required><em>N</em></span></label>
+              <label>Tempo de queima<span class="input-group"><input name="burn_time" type="number" min="0.01" max="100" step="any" value="2" required><em>s</em></span></label>
+            </div>
+            <div id="curve-motor-fields" hidden>
+              <button class="btn btn-outline btn-sm" id="import-motor" type="button">↑ Importar curva (.csv / .eng)</button>
+              <input id="motor-file" type="file" accept=".csv,.eng" hidden>
+              <label class="form-label" id="motor-select-label" for="motor-select" hidden>Motor</label>
+              <select id="motor-select" hidden></select>
+              <p id="motor-status" class="help-text" role="status">CSV ou ENG (RASP). Dados em segundos e newtons.</p>
+              <div id="motor-metadata" class="help-text"></div>
+            </div>
+            <div class="motor-preview"><canvas id="motor-curve-chart" aria-label="Curva de empuxo"></canvas><div id="motor-summary" aria-live="polite"></div></div>
+          </fieldset>
+
+          <!-- Campos dinâmicos -->
+          <div id="parameter-fields"></div>
+
+          <!-- Recuperação -->
+          <fieldset>
+            <legend>Recuperação</legend>
+            <label class="checkbox-label"><input id="recovery-enabled" type="checkbox"> Simular paraquedas</label>
+            <div id="recovery-fields" hidden>
+              <label class="form-label" for="recovery-trigger">Gatilho</label>
+              <select id="recovery-trigger">
+                <option value="apogee">Apogeu</option>
+                <option value="time">Tempo</option>
+                <option value="altitude">Altitude</option>
+              </select>
+              <div class="field-grid">
+                <label id="recovery-time-label" hidden>Tempo do gatilho<span class="input-group"><input id="recovery-time" type="number" min="0" max="180" step="any" value="5"><em>s</em></span></label>
+                <label id="recovery-altitude-label" hidden>Altitude do gatilho<span class="input-group"><input id="recovery-altitude" type="number" min="0" max="10000" step="any" value="50"><em>m</em></span></label>
+                <label>Atraso para ejeção<span class="input-group"><input id="recovery-delay" type="number" min="0" max="60" step="any" value="0"><em>s</em></span></label>
+                <label>Tempo de abertura<span class="input-group"><input id="recovery-inflation" type="number" min="0.01" max="30" step="any" value="1"><em>s</em></span></label>
+                <label>Área aberta<span class="input-group"><input id="recovery-area" type="number" min="0.001" max="20" step="any" value="0.3"><em>m²</em></span></label>
+                <label>Cd do velame<span class="input-group"><input id="recovery-cd" type="number" min="0.1" max="3" step="any" value="1.5"><em>Cd</em></span></label>
+              </div>
+              <p class="help-text">Área projetada da copa totalmente aberta. A inflação é progressiva.</p>
+            </div>
+          </fieldset>
+
+          <div class="run-area">
+            <button class="btn btn-primary" id="run" type="submit">Executar simulação</button>
+            <p id="config-status" class="help-text center">Parâmetros do exemplo sintético</p>
+          </div>
+        </form>
+
+        <div class="config-actions">
+          <button class="link-btn" id="import-config">↑ Importar JSON</button>
+          <button class="link-btn" id="save-config">↓ Salvar parâmetros</button>
+          <button class="link-btn" id="export-json">↓ Exportar estudo</button>
+        </div>
+        <input id="config-file" type="file" accept=".json" hidden>
+      </aside>
+
+      <!-- Coluna de resultados -->
+      <div class="results-column">
+
+        <!-- Cena 3D -->
+        <div class="scene-card card">
+          <div class="scene-toolbar">
+            <div><span class="scene-indicator"></span> Trajetória 3D</div>
+            <div class="camera-controls">
+              <button id="camera-orbit" class="selected">Perspectiva</button>
+              <button id="camera-side">Lateral</button>
+              <button id="camera-reset" aria-label="Resetar câmera">↺</button>
+            </div>
+          </div>
+          <canvas id="scene" tabindex="0" aria-label="Trajetória 3D interativa"></canvas>
+          <div class="scene-hud">
+            <span class="hud-label">ENU</span>
+            <div id="live-altitude">0,0 <small>m</small></div>
+            <span id="live-phase" class="hud-phase">AGUARDANDO SIMULAÇÃO</span>
+          </div>
+          <div class="scene-footer">
+            <span><i class="legend-line"></i> Trajetória</span>
+            <span><i class="legend-dot"></i> Posição atual</span>
+          </div>
+        </div>
+
+        <!-- Playback -->
+        <div class="playback-bar card">
+          <button id="play" class="play-btn" aria-label="Reproduzir">▶</button>
+          <span id="play-time" class="time-display">T+ 0,00 s</span>
+          <input id="timeline" type="range" min="0" max="1000" value="0" aria-label="Timeline">
+          <span id="end-time" class="time-display">0,00 s</span>
+          <select id="play-speed" aria-label="Velocidade">
+            <option value="1">1×</option>
+            <option value="2" selected>2×</option>
+            <option value="5">5×</option>
+          </select>
+        </div>
+
+        <!-- Gráficos -->
+        <div class="charts-grid">
+          <div class="chart-card card">
+            <div class="card-header"><h2>Altitude</h2><span class="unit-tag">m / s</span></div>
+            <canvas id="altitude-chart" aria-label="Altitude vs tempo"></canvas>
+          </div>
+          <div class="chart-card card">
+            <div class="card-header"><h2>Velocidade</h2><span class="unit-tag">m/s / s</span></div>
+            <canvas id="speed-chart" aria-label="Velocidade vs tempo"></canvas>
+          </div>
+        </div>
+        <div class="charts-grid">
+          <div class="chart-card card">
+            <div class="card-header"><h2>Variação da rapidez</h2><span class="unit-tag">m/s² / s</span></div>
+            <canvas id="acceleration-chart" aria-label="Variação da rapidez ao longo do tempo"></canvas>
+          </div>
+          <div class="chart-card card">
+            <div class="card-header"><h2>Arrasto</h2><span class="unit-tag">N / s</span></div>
+            <canvas id="drag-chart" aria-label="Arrasto vs tempo"></canvas>
+          </div>
+        </div>
+        <div class="flight-details" id="flight-details" aria-live="polite"></div>
+
+        <div class="info-banner">
+          <span>ⓘ</span>
+          <p><strong>Modelo simplificado.</strong> Precisão experimental não estabelecida. Importe medições na aba Validação.</p>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════ CÁLCULOS ═══════════ -->
+<section id="view-calculos" class="view" aria-label="Memória de cálculo">
+  <div class="container">
+    <div class="section-header">
+      <p class="overline">MEMÓRIA DE CÁLCULO</p>
+      <h2>Do parâmetro ao resultado.</h2>
+      <p class="section-desc">Equações, unidades e valores do estudo executado. Precisão dupla IEEE 754.</p>
+    </div>
+
+    <div class="equations-grid">
+      <article class="card equation-card">
+        <span class="overline">01 · DINÂMICA</span>
+        <h3>Segunda lei de Newton</h3>
+        <div class="equation">a = (T · û + D⃗) / m + g⃗</div>
+        <p>RK4 com controle de erro por subdivisão de passos. Direção de empuxo fixa pelos ângulos configurados, sem simulação de atitude.</p>
+      </article>
+      <article class="card equation-card">
+        <span class="overline">02 · AERODINÂMICA</span>
+        <h3>Arrasto quadrático</h3>
+        <div class="equation">D⃗ = −½ ρ C<sub>d</sub> A |v⃗<sub>rel</sub>| v⃗<sub>rel</sub></div>
+        <p>A = πd²/4. v⃗<sub>rel</sub> = v⃗ − vento. Soma-se o CdA do paraquedas, que cresce linearmente durante a abertura. Não há modelo de choque estrutural.</p>
+      </article>
+      <article class="card equation-card">
+        <span class="overline">03 · MASSA</span>
+        <h3>Consumo de propelente</h3>
+        <div class="equation">m(t) = m<sub>seca</sub> + m<sub>p</sub> · max(0, 1 − t/t<sub>b</sub>)</div>
+        <p>No motor constante, consumo linear no tempo. Com curva, substitui-se t/tb por I(t)/I_total: aproximação de consumo proporcional ao impulso acumulado.</p>
+      </article>
+      <article class="card equation-card">
+        <span class="overline">04 · AMBIENTE</span>
+        <h3>Atmosfera exponencial</h3>
+        <div class="equation">ρ(h) = ρ₀ e<sup>−h/8500</sup></div>
+        <p>g = 9,80665 m/s². Solo plano. Referencial ENU.</p>
+      </article>
+    </div>
+
+    <div class="two-col">
+      <article class="card padded">
+        <div class="card-header"><h2>Inspeção do instante</h2><span class="badge" id="inspection-time">T+ 0 s</span></div>
+        <p class="text-muted">Mova o cursor para examinar os valores calculados.</p>
+        <input id="inspection-slider" type="range" min="0" max="1000" value="0" aria-label="Instante">
+        <div id="instant-values" class="instant-grid"></div>
+        <p class="help-text">Forças calculadas no núcleo C++. No apoio, a aceleração é zero; no solo, a velocidade final é a de chegada, antes do impacto. Variação negativa da rapidez indica desaceleração.</p>
+      </article>
+      <article class="card padded">
+        <div class="card-header"><h2>Verificação numérica</h2><span class="badge">RK4</span></div>
+        <p>Compare o apogeu com h, h/2 e h/4.</p>
+        <button class="btn btn-outline" id="convergence">Comparar passos temporais</button>
+        <div id="convergence-result" class="result-box" aria-live="polite">Execute para ver os valores.</div>
+      </article>
+    </div>
+
+    <article class="card padded events-section">
+      <div class="card-header"><h2>Eventos de voo</h2><button class="link-btn" id="export-csv">↓ Exportar CSV</button></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Evento</th><th>Tempo (s)</th><th>Altitude (m)</th><th>Detecção</th></tr></thead>
+          <tbody id="events"></tbody>
+        </table>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- ═══════════ VALIDAÇÃO ═══════════ -->
+<section id="view-validacao" class="view" aria-label="Validação experimental">
+  <div class="container">
+    <div class="section-header">
+      <p class="overline">VALIDAÇÃO EXPERIMENTAL</p>
+      <h2>A precisão precisa de evidência.</h2>
+      <p class="section-desc">Carregue medições de voo para quantificar diferenças com o modelo.</p>
+    </div>
+
+    <div class="two-col">
+      <article class="card padded">
+        <div class="card-header"><h2>Dados experimentais</h2><span class="badge">CSV / SI</span></div>
+        <p>Use <code>time</code> (s) e colunas: <code>altitude</code>, <code>east</code>, <code>north</code> (m), <code>speed</code> (m/s).</p>
+        <pre>time,altitude
+0.0,0.0
+0.5,2.3
+1.0,9.5</pre>
+        <label class="upload-area" for="observations-file" tabindex="0" role="button">
+          <span>↑</span>
+          <strong>Selecionar medições</strong>
+          <small>CSV · até 10.000 linhas</small>
+        </label>
+        <input id="observations-file" type="file" accept=".csv" hidden>
+        <p id="observations-status" role="status" class="help-text">Nenhum arquivo carregado.</p>
+        <button class="btn btn-primary" id="validate" disabled>Comparar com simulação</button>
+      </article>
+      <article class="card padded">
+        <div class="card-header"><h2>Critérios</h2><span class="badge">V&amp;V</span></div>
+        <dl class="def-list">
+          <dt>RMSE</dt><dd>Raiz do erro quadrático médio.</dd>
+          <dt>Viés</dt><dd>Média de simulado − medido.</dd>
+          <dt>99,9%</dt><dd>Exige tolerância e incerteza dos sensores definidas.</dd>
+        </dl>
+        <div class="notice-box">Esta versão compara dados; não calibra automaticamente.</div>
+      </article>
+    </div>
+
+    <article class="card padded">
+      <div class="card-header"><h2>Relatório</h2><button class="link-btn" id="export-validation" disabled>↓ Exportar</button></div>
+      <div id="validation-empty" class="empty-state">
+        <span>◎</span>
+        <h3>Importe dados e compare.</h3>
+        <p>O relatório aparecerá aqui com resíduos e métricas.</p>
+      </div>
+      <div id="validation-content" hidden>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Grandeza</th><th>N</th><th>RMSE</th><th>MAE</th><th>Viés</th><th>Máx.</th></tr></thead>
+            <tbody id="validation-table"></tbody>
+          </table>
+        </div>
+        <canvas id="residual-chart" aria-label="Resíduos"></canvas>
+        <p id="validation-note" class="help-text"></p>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- ═══════════ SOBRE ═══════════ -->
+<section id="view-sobre" class="view" aria-label="Sobre o projeto">
+  <div class="container">
+    <div class="about-hero-section">
+      <p class="overline">SOBRE O PROJETO</p>
+      <h2>Entender o voo.<br>Construir evidências.</h2>
+      <p>Um laboratório computacional aberto à inspeção para conectar modelagem física, visualização 3D e dados experimentais.</p>
+    </div>
+
+    <div class="about-grid">
+      <article class="card padded">
+        <span class="overline">01 · PROPÓSITO</span>
+        <h3>Pesquisa com transparência</h3>
+        <p>Acesso aos parâmetros, equações e resultados intermediários. Exportação completa para reprodução.</p>
+      </article>
+      <article class="card padded">
+        <span class="overline">02 · ARQUITETURA</span>
+        <h3>Núcleo C++17 unificado</h3>
+        <p>Terminal e aplicativo usam o mesmo código, compilado como executável nativo ou WebAssembly.</p>
+      </article>
+      <article class="card padded">
+        <span class="overline">03 · MATURIDADE</span>
+        <h3>Base para investigação</h3>
+        <p>Protótipo científico com testes analíticos. Não equivale a simulador de alta fidelidade.</p>
+      </article>
+    </div>
+
+    <div class="two-col">
+      <article class="card padded">
+        <h3>Escopo físico</h3>
+        <ul class="feature-list">
+          <li>Ponto material, 3 graus de liberdade</li>
+          <li>Empuxo constante ou curva real de motor</li>
+          <li>Arrasto quadrático, Cd constante, atmosfera exponencial</li>
+          <li>Recuperação por paraquedas com inflação progressiva</li>
+          <li>Sem atitude, órbitas ou rotação terrestre</li>
+        </ul>
+      </article>
+      <article class="card padded">
+        <h3>Referências</h3>
+        <p>Formulação baseada nos materiais educacionais NASA Glenn.</p>
+        <a class="ref-link" href="https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/flight-of-a-model-rocket/" target="_blank" rel="noopener">NASA · Flight of a Model Rocket ↗</a>
+        <a class="ref-link" href="https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/ideal-rocket-equation/" target="_blank" rel="noopener">NASA · Ideal Rocket Equation ↗</a>
+      </article>
+    </div>
+
+    <article class="card padded">
+      <span class="overline">TERMINAL</span>
+      <pre>node run-core.mjs --thrust 12 --elevation 85 --json estudo.json
+python -m trajetoria app
+python -m trajetoria simulate --config exemplos/padrao.json</pre>
+    </article>
+  </div>
+</section>
+
+<footer class="site-footer">
+  <div class="container footer-inner">
+    <span>Trajetória · Simulador Educacional</span>
+    <span>Parâmetros explícitos. Resultados reproduzíveis.</span>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "dry_mass": 0.35,
+  "propellant_mass": 0.08,
+  "thrust": 12,
+  "burn_time": 2,
+  "diameter": 0.05,
+  "drag_coefficient": 0.55,
+  "elevation": 85,
+  "azimuth": 30,
+  "wind_east": 2,
+  "wind_north": 0.5,
+  "air_density": 1.225,
+  "time_step": 0.02,
+  "max_time": 120
+}

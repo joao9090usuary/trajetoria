@@ -1,0 +1,30 @@
+name: Verificação do projeto
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verificacao:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Obter o código
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Configurar Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Verificar os arquivos versionados
+        run: python scripts/verificar_publicacao.py
+      - name: Compilar o núcleo
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+      - name: Executar verificações analíticas e de integração
+        run: python run-tests.py
+      - name: Verificar sintaxe JavaScript
+        run: node --check trajetoria/static/app.js
